@@ -1,0 +1,49 @@
+[project]
+name = "spark-data-quality"
+version = "0.1.0"
+description = "Typed, Spark-native data-quality validation for PySpark DataFrames"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "datenwissenschaften", email = "martin.franke@datenwissenschaften.com" },
+]
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "pydantic>=2.10,<3",
+    "pyspark>=4.0,<4.2",
+]
+
+[project.urls]
+Repository = "https://github.com/datenwissenschaften/spark-data-quality"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.3,<10"
+pytest-cov = ">=6,<8"
+ruff = ">=0.9,<0.15"
+mypy = ">=1.14,<2"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+markers = [
+    "integration: tests that execute against a local SparkSession",
+]
