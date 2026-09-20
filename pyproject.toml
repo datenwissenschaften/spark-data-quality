@@ -8,7 +8,7 @@ license-files = ["LICENSE"]
 authors = [
     { name = "datenwissenschaften", email = "martin.franke@datenwissenschaften.com" },
 ]
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic>=2.10,<3",
     "pyspark>=4.0,<4.2",

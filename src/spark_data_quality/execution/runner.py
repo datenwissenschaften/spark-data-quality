@@ -17,14 +17,14 @@ class ExecutionOutput:
 
     metrics: dict[str, Any]
     aggregate_actions: int
-    aggregation_duration_ms: float
+    spark_execution_duration_ms: float
 
 
 def execute_plan(dataframe: DataFrame, plan: AggregationPlan) -> ExecutionOutput:
     """Run the plan, collecting at most one aggregate row to the driver."""
 
     if not plan.metrics:
-        return ExecutionOutput(metrics={}, aggregate_actions=0, aggregation_duration_ms=0.0)
+        return ExecutionOutput(metrics={}, aggregate_actions=0, spark_execution_duration_ms=0.0)
 
     started = perf_counter()
     row = dataframe.agg(*(metric.expression for metric in plan.metrics)).first()
@@ -34,5 +34,5 @@ def execute_plan(dataframe: DataFrame, plan: AggregationPlan) -> ExecutionOutput
     return ExecutionOutput(
         metrics=row.asDict(recursive=True),
         aggregate_actions=1,
-        aggregation_duration_ms=elapsed_ms,
+        spark_execution_duration_ms=elapsed_ms,
     )

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from time import perf_counter
 from typing import Any
+
+from pyspark.sql.types import DataType
 
 from spark_data_quality.checks import (
     AllowedValues,
@@ -18,18 +19,16 @@ from spark_data_quality.checks import (
 )
 from spark_data_quality.execution.planning import PreparedCheck
 from spark_data_quality.models import CheckResult, CheckStatus
+from spark_data_quality.models.values import JsonValue
 
 
 def evaluate_check(
     prepared: PreparedCheck,
     metrics: Mapping[str, Any],
-    aggregation_duration_ms: float,
 ) -> CheckResult:
     """Build a public result from one prepared check and scalar metrics."""
 
-    started = perf_counter()
     check = prepared.check
-    duration = prepared.planning_duration_ms
 
     if prepared.diagnostic is not None:
         return CheckResult(
@@ -38,7 +37,6 @@ def evaluate_check(
             description=check.description,
             status=CheckStatus.ERROR,
             expected=check.expected(),
-            execution_duration_ms=duration + _elapsed_ms(started),
             diagnostic=prepared.diagnostic,
         )
 
@@ -48,24 +46,19 @@ def evaluate_check(
             prepared,
             CheckStatus.PASS if observed_exists else CheckStatus.FAIL,
             observed=observed_exists,
-            duration_ms=duration + _elapsed_ms(started),
         )
 
     if isinstance(check, HasType):
-        schema_observed = str(prepared.schema_observation)
-        status = (
-            CheckStatus.PASS
-            if schema_observed == check.expected_type.simpleString()
-            else CheckStatus.FAIL
-        )
+        actual_type = prepared.schema_observation
+        if not isinstance(actual_type, DataType):
+            raise TypeError("HasType requires a planned Spark DataType observation")
+        status = CheckStatus.PASS if actual_type == check.expected_type else CheckStatus.FAIL
         return _result(
             prepared,
             status,
-            observed=schema_observed,
-            duration_ms=duration + _elapsed_ms(started),
+            observed=actual_type.simpleString(),
         )
 
-    duration += aggregation_duration_ms
     total = int(metrics[prepared.metric_aliases["total"]])
 
     if isinstance(check, RowCount):
@@ -76,19 +69,23 @@ def evaluate_check(
             CheckStatus.PASS if passes_min and passes_max else CheckStatus.FAIL,
             observed=total,
             total_rows=total,
-            duration_ms=duration + _elapsed_ms(started),
         )
 
     if isinstance(check, Unique):
-        non_null = int(metrics[prepared.metric_aliases["non_null"]])
+        evaluated = int(metrics[prepared.metric_aliases["evaluated"]])
         distinct = int(metrics[prepared.metric_aliases["distinct"]])
-        affected = non_null - distinct
-        data_observed: Any = {
-            "non_null_count": non_null,
+        affected = evaluated - distinct
+        data_observed: JsonValue = {
+            "non_null_count": evaluated,
             "distinct_count": distinct,
             "duplicate_excess_count": affected,
         }
-    elif isinstance(check, (NotNull, InRange, AllowedValues, MatchesRegex)):
+    elif isinstance(check, NotNull):
+        evaluated = total
+        affected = int(metrics[prepared.metric_aliases["invalid"]] or 0)
+        data_observed = affected
+    elif isinstance(check, (InRange, AllowedValues, MatchesRegex)):
+        evaluated = int(metrics[prepared.metric_aliases["evaluated"]])
         affected = int(metrics[prepared.metric_aliases["invalid"]] or 0)
         data_observed = affected
     else:
@@ -100,8 +97,8 @@ def evaluate_check(
         observed=data_observed,
         affected_rows=affected,
         total_rows=total,
-        failure_fraction=affected / total if total else 0.0,
-        duration_ms=duration + _elapsed_ms(started),
+        evaluated_rows=evaluated,
+        failure_fraction=affected / evaluated if evaluated else None,
     )
 
 
@@ -109,10 +106,10 @@ def _result(
     prepared: PreparedCheck,
     status: CheckStatus,
     *,
-    observed: Any,
-    duration_ms: float,
+    observed: JsonValue,
     affected_rows: int | None = None,
     total_rows: int | None = None,
+    evaluated_rows: int | None = None,
     failure_fraction: float | None = None,
 ) -> CheckResult:
     check = prepared.check
@@ -125,10 +122,6 @@ def _result(
         expected=check.expected(),
         affected_rows=affected_rows,
         total_rows=total_rows,
+        evaluated_rows=evaluated_rows,
         failure_fraction=failure_fraction,
-        execution_duration_ms=duration_ms,
     )
-
-
-def _elapsed_ms(started: float) -> float:
-    return (perf_counter() - started) * 1_000

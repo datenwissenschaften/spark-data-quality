@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import math
+from decimal import Decimal
 from time import perf_counter
-from typing import Any
 
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
-from pyspark.sql.types import NumericType, StringType
+from pyspark.sql.types import DoubleType, FloatType, NumericType, StringType
 
 from spark_data_quality.exceptions import InvalidProfileError
+from spark_data_quality.models.values import NonFiniteFloat, NumericValue
 from spark_data_quality.profiling.models import (
     ColumnProfile,
     NumericStatistics,
@@ -83,6 +85,11 @@ def profile(
                     F.stddev_samp(value).alias(aliases[column]["stddev"]),
                 ]
             )
+            if isinstance(dataframe.schema[column].dataType, (FloatType, DoubleType)):
+                aliases[column]["nan"] = f"{prefix}_nan"
+                expressions.append(
+                    F.sum(F.when(F.isnan(value), 1).otherwise(0)).alias(aliases[column]["nan"])
+                )
         else:
             aliases[column].update(
                 {"min_length": f"{prefix}_min_length", "max_length": f"{prefix}_max_length"}
@@ -94,35 +101,43 @@ def profile(
                 ]
             )
 
+    scalar_started = perf_counter()
     scalar_row = dataframe.agg(*expressions).first()
+    scalar_duration_ms = (perf_counter() - scalar_started) * 1_000
     if scalar_row is None:
         raise RuntimeError("Spark aggregate unexpectedly returned no result row")
     metrics = scalar_row.asDict(recursive=True)
     profiles: list[ColumnProfile] = []
     top_value_actions = 0
+    top_values_duration_ms = 0.0
 
     for column in selected:
         spark_type = dataframe.schema[column].dataType
-        common: dict[str, Any] = {
-            "column": column,
-            "spark_type": spark_type.simpleString(),
-            "null_count": int(metrics[aliases[column]["null"]] or 0),
-            "distinct_count": int(metrics[aliases[column]["distinct"]] or 0),
-        }
+        null_count = int(metrics[aliases[column]["null"]] or 0)
+        distinct_count = int(metrics[aliases[column]["distinct"]] or 0)
         if isinstance(spark_type, NumericType):
             profiles.append(
                 ColumnProfile(
-                    **common,
+                    column=column,
+                    spark_type=spark_type.simpleString(),
                     kind="numeric",
+                    null_count=null_count,
+                    distinct_count=distinct_count,
                     numeric=NumericStatistics(
-                        minimum=metrics[aliases[column]["min"]],
-                        maximum=metrics[aliases[column]["max"]],
-                        mean=metrics[aliases[column]["mean"]],
-                        standard_deviation=metrics[aliases[column]["stddev"]],
+                        nan_count=(
+                            int(metrics[aliases[column]["nan"]] or 0)
+                            if "nan" in aliases[column]
+                            else None
+                        ),
+                        minimum=_normalize_numeric(metrics[aliases[column]["min"]]),
+                        maximum=_normalize_numeric(metrics[aliases[column]["max"]]),
+                        mean=_normalize_numeric(metrics[aliases[column]["mean"]]),
+                        standard_deviation=_normalize_numeric(metrics[aliases[column]["stddev"]]),
                     ),
                 )
             )
         else:
+            top_values_started = perf_counter()
             top_rows = (
                 dataframe.where(_column(column).isNotNull())
                 .groupBy(_column(column).alias("value"))
@@ -131,11 +146,15 @@ def profile(
                 .limit(top_k)
                 .collect()
             )
+            top_values_duration_ms += (perf_counter() - top_values_started) * 1_000
             top_value_actions += 1
             profiles.append(
                 ColumnProfile(
-                    **common,
+                    column=column,
+                    spark_type=spark_type.simpleString(),
                     kind="string",
+                    null_count=null_count,
+                    distinct_count=distinct_count,
                     string=StringStatistics(
                         minimum_length=metrics[aliases[column]["min_length"]],
                         maximum_length=metrics[aliases[column]["max_length"]],
@@ -155,6 +174,8 @@ def profile(
             aggregate_metric_count=len(expressions),
             top_value_actions=top_value_actions,
             top_k=top_k,
+            scalar_aggregation_duration_ms=scalar_duration_ms,
+            top_values_duration_ms=top_values_duration_ms,
         ),
         total_duration_ms=(perf_counter() - started) * 1_000,
     )
@@ -163,3 +184,21 @@ def profile(
 def _column(name: str) -> Column:
     escaped = name.replace("`", "``")
     return F.col(f"`{escaped}`")
+
+
+def _normalize_numeric(value: object) -> NumericValue | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise TypeError("Spark returned a boolean for a numeric profile statistic")
+    if isinstance(value, (int, Decimal)):
+        return value
+    if isinstance(value, float):
+        if math.isnan(value):
+            return NonFiniteFloat.NAN
+        if value == math.inf:
+            return NonFiniteFloat.POSITIVE_INFINITY
+        if value == -math.inf:
+            return NonFiniteFloat.NEGATIVE_INFINITY
+        return value
+    raise TypeError(f"Spark returned unsupported numeric statistic type {type(value).__name__}")

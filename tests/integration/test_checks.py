@@ -1,15 +1,28 @@
 """Built-in checks executed against a real local SparkSession."""
 
+import math
 from collections.abc import Callable
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import ClassVar
 
 import pytest
-from pyspark.sql import SparkSession
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.types import (
+    BooleanType,
+    ByteType,
+    DateType,
+    DecimalType,
+    DoubleType,
+    FloatType,
     IntegerType,
     LongType,
+    MapType,
+    ShortType,
     StringType,
     StructField,
     StructType,
+    TimestampType,
 )
 
 from spark_data_quality import (
@@ -25,6 +38,7 @@ from spark_data_quality import (
     RowCount,
     Unique,
 )
+from spark_data_quality.models.values import JsonValue
 
 
 @pytest.mark.integration
@@ -78,6 +92,9 @@ def test_data_violations_are_failures_with_diagnostics(spark: SparkSession) -> N
     assert report.status is CheckStatus.FAIL
     assert [result.affected_rows for result in report.results[:5]] == [1, 1, 2, 1, 1]
     assert report.results[0].failure_fraction == pytest.approx(1 / 3)
+    assert report.results[0].evaluated_rows == 3
+    assert report.results[2].evaluated_rows == 2
+    assert report.results[2].failure_fraction == 1.0
     assert report.results[1].observed_value == {
         "non_null_count": 2,
         "distinct_count": 1,
@@ -213,7 +230,8 @@ def test_empty_dataframe_semantics(spark: SparkSession) -> None:
     results = suite.validate(dataframe).results
 
     assert [result.status for result in results] == [CheckStatus.PASS] * 8 + [CheckStatus.FAIL]
-    assert results[2].failure_fraction == 0.0
+    assert results[2].failure_fraction is None
+    assert results[2].evaluated_rows == 0
 
 
 @pytest.mark.integration
@@ -246,8 +264,19 @@ def test_suite_error_takes_precedence_over_failure(spark: SparkSession) -> None:
 
 
 @pytest.mark.integration
-def test_compatible_checks_share_one_aggregation_action(spark: SparkSession) -> None:
+def test_compatible_checks_share_one_aggregation_action(
+    spark: SparkSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
     dataframe = spark.createDataFrame([(1, "A"), (2, "B")], "id long, code string")
+    dataframe_type = type(dataframe)
+    original_agg = dataframe_type.agg
+    aggregate_calls: list[int] = []
+
+    def tracked_agg(frame: DataFrame, *expressions: object) -> DataFrame:
+        aggregate_calls.append(len(expressions))
+        return original_agg(frame, *expressions)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(dataframe_type, "agg", tracked_agg)
     suite = QualitySuite(
         "shared",
         [
@@ -262,8 +291,9 @@ def test_compatible_checks_share_one_aggregation_action(spark: SparkSession) -> 
 
     report = suite.validate(dataframe)
 
+    assert aggregate_calls == [7]
     assert report.metadata.aggregate_actions == 1
-    assert report.metadata.aggregate_metric_count == 6
+    assert report.metadata.aggregate_metric_count == 7
     assert report.metadata.planned_groups == ("shared_aggregate",)
 
 
@@ -292,3 +322,276 @@ def test_integer_allowed_values_require_integral_column(spark: SparkSession) -> 
     )
 
     assert result.status is CheckStatus.PASS
+
+
+@pytest.mark.integration
+def test_has_type_uses_exact_spark_datatype_equality(spark: SparkSession) -> None:
+    fields = [
+        StructField("string", StringType()),
+        StructField("boolean", BooleanType()),
+        StructField("byte", ByteType()),
+        StructField("short", ShortType()),
+        StructField("integer", IntegerType()),
+        StructField("long", LongType()),
+        StructField("float", FloatType()),
+        StructField("double", DoubleType()),
+        StructField("decimal", DecimalType(20, 4)),
+        StructField("date", DateType()),
+        StructField("timestamp", TimestampType()),
+    ]
+    dataframe = spark.createDataFrame([], StructType(fields))
+    checks = [HasType(field.name, field.dataType) for field in fields]
+    checks.append(HasType("decimal", DecimalType(20, 5)))
+
+    results = QualitySuite("exact-types", checks).validate(dataframe).results
+
+    assert [result.status for result in results[:-1]] == [CheckStatus.PASS] * len(fields)
+    assert results[-1].status is CheckStatus.FAIL
+    assert results[-1].observed_value == "decimal(20,4)"
+
+
+@pytest.mark.integration
+def test_nan_null_and_infinity_semantics(spark: SparkSession) -> None:
+    dataframe = spark.createDataFrame(
+        [(1.0,), (None,), (math.nan,), (math.nan,), (math.inf,), (-math.inf,)],
+        StructType([StructField("value", DoubleType())]),
+    )
+    suite = QualitySuite(
+        "special-floats",
+        [
+            NotNull("value"),
+            Unique("value"),
+            InRange("value", min_value=-10.0, max_value=10.0),
+            InRange("value", min_value=-10.0),
+            InRange("value", max_value=10.0),
+        ],
+    )
+
+    results = suite.validate(dataframe).results
+
+    assert results[0].affected_rows == 1  # NaN and infinities are not SQL NULL.
+    assert results[0].evaluated_rows == 6
+    assert results[1].observed_value == {
+        "non_null_count": 5,
+        "distinct_count": 4,
+        "duplicate_excess_count": 1,
+    }
+    assert results[1].failure_fraction == pytest.approx(1 / 5)
+    assert results[2].affected_rows == 4  # two NaNs and both infinities
+    assert results[3].affected_rows == 3  # two NaNs and negative infinity
+    assert results[4].affected_rows == 3  # two NaNs and positive infinity
+
+
+@pytest.mark.integration
+def test_float_nan_is_always_out_of_range(spark: SparkSession) -> None:
+    dataframe = spark.createDataFrame(
+        [(1.0,), (math.nan,)],
+        StructType([StructField("value", FloatType())]),
+    )
+
+    result = (
+        QualitySuite("float-nan", [InRange("value", min_value=0.0)]).validate(dataframe).results[0]
+    )
+
+    assert result.status is CheckStatus.FAIL
+    assert result.affected_rows == 1
+
+
+@pytest.mark.integration
+def test_decimal_range_uses_decimal_bounds_without_float_conversion(
+    spark: SparkSession,
+) -> None:
+    dataframe = spark.createDataFrame(
+        [
+            (Decimal("0.123456789012345678"),),
+            (Decimal("0.123456789012345679"),),
+            (None,),
+        ],
+        StructType([StructField("value", DecimalType(30, 18))]),
+    )
+    exact = InRange(
+        "value",
+        min_value=Decimal("0.123456789012345678"),
+        max_value=Decimal("0.123456789012345678"),
+    )
+
+    result = QualitySuite("decimal", [exact]).validate(dataframe).results[0]
+    incompatible = (
+        QualitySuite("decimal-float", [InRange("value", min_value=0.1)])
+        .validate(dataframe)
+        .results[0]
+    )
+
+    assert result.status is CheckStatus.FAIL
+    assert result.affected_rows == 1
+    assert result.evaluated_rows == 2
+    assert incompatible.status is CheckStatus.ERROR
+    assert incompatible.diagnostic is not None
+    assert incompatible.diagnostic.code == "INCOMPATIBLE_BOUND_TYPE"
+
+
+@pytest.mark.integration
+def test_decimal_bound_on_non_decimal_column_is_error(spark: SparkSession) -> None:
+    dataframe = spark.createDataFrame([(1,), (2,)], "value long")
+
+    result = (
+        QualitySuite("decimal-bound", [InRange("value", min_value=Decimal("1"))])
+        .validate(dataframe)
+        .results[0]
+    )
+
+    assert result.status is CheckStatus.ERROR
+    assert result.diagnostic is not None
+    assert result.diagnostic.code == "INCOMPATIBLE_BOUND_TYPE"
+
+
+@dataclass(frozen=True, slots=True)
+class _UnsupportedCheck(Check):
+    """A minimal, non-built-in Check used to test planner extensibility limits."""
+
+    column: str
+    check_type: ClassVar[str] = "unsupported"
+
+    @property
+    def description(self) -> str:
+        return f"Column {self.column!r} satisfies an unsupported custom expectation"
+
+    @property
+    def required_columns(self) -> tuple[str, ...]:
+        return (self.column,)
+
+    def expected(self) -> dict[str, JsonValue]:
+        return {"column": self.column}
+
+
+@pytest.mark.integration
+def test_custom_check_subclass_raises_type_error_instead_of_silent_result(
+    spark: SparkSession,
+) -> None:
+    dataframe = spark.createDataFrame([(1,)], "value long")
+    suite = QualitySuite("unsupported", [_UnsupportedCheck(column="value")])
+
+    with pytest.raises(TypeError, match="Unsupported check type"):
+        suite.validate(dataframe)
+
+
+@pytest.mark.integration
+def test_unique_reports_excess_duplicates_not_all_duplicate_group_rows(
+    spark: SparkSession,
+) -> None:
+    dataframe = spark.createDataFrame([("A",), ("A",), ("A",), (None,), (None,)], "value string")
+
+    result = QualitySuite("unique", [Unique("value")]).validate(dataframe).results[0]
+
+    assert result.status is CheckStatus.FAIL
+    assert result.affected_rows == 2
+    assert result.evaluated_rows == 3
+    assert result.failure_fraction == pytest.approx(2 / 3)
+
+
+@pytest.mark.integration
+def test_allowed_values_supports_decimal_without_coercion(spark: SparkSession) -> None:
+    dataframe = spark.createDataFrame(
+        [(Decimal("1.10"),), (Decimal("2.20"),), (None,)],
+        StructType([StructField("value", DecimalType(10, 2))]),
+    )
+
+    result = (
+        QualitySuite(
+            "decimal-allowed",
+            [AllowedValues("value", {Decimal("1.10"), Decimal("2.20")})],
+        )
+        .validate(dataframe)
+        .results[0]
+    )
+
+    assert result.status is CheckStatus.PASS
+    assert result.evaluated_rows == 2
+    assert result.failure_fraction == 0.0
+
+
+@pytest.mark.integration
+def test_unique_rejects_map_columns_without_poisoning_valid_checks(
+    spark: SparkSession,
+) -> None:
+    schema = StructType(
+        [
+            StructField("id", LongType()),
+            StructField("attributes", MapType(StringType(), StringType())),
+        ]
+    )
+    dataframe = spark.createDataFrame([(1, {"a": "b"}), (2, {"c": "d"})], schema)
+    suite = QualitySuite(
+        "map-isolation",
+        [NotNull("id"), Unique("attributes"), RowCount(min_count=2)],
+    )
+
+    report = suite.validate(dataframe)
+
+    assert [result.status for result in report.results] == [
+        CheckStatus.PASS,
+        CheckStatus.ERROR,
+        CheckStatus.PASS,
+    ]
+    assert report.metadata.aggregate_actions == 1
+
+
+@pytest.mark.integration
+def test_jvm_regex_semantics_and_malformed_pattern_isolation(spark: SparkSession) -> None:
+    dataframe = spark.createDataFrame(
+        [(1, "foo.bar"), (2, "other"), (3, ""), (4, None)],
+        "id long, text string",
+    )
+    suite = QualitySuite(
+        "regex",
+        [
+            NotNull("id"),
+            MatchesRegex("text", r"\Qfoo.bar\E"),
+            MatchesRegex("text", "["),
+            MatchesRegex("text", r"^$"),
+            RowCount(min_count=4),
+        ],
+    )
+
+    report = suite.validate(dataframe)
+
+    assert [result.status for result in report.results] == [
+        CheckStatus.PASS,
+        CheckStatus.FAIL,
+        CheckStatus.ERROR,
+        CheckStatus.FAIL,
+        CheckStatus.PASS,
+    ]
+    assert report.results[1].affected_rows == 2
+    assert report.results[1].evaluated_rows == 3
+    assert report.results[2].diagnostic is not None
+    assert report.results[2].diagnostic.code == "INVALID_REGEX"
+    assert report.metadata.aggregate_actions == 1
+
+
+@pytest.mark.integration
+def test_schema_only_suite_runs_no_spark_action_and_has_phase_timings(
+    spark: SparkSession,
+) -> None:
+    dataframe = spark.createDataFrame([], "id long")
+
+    report = QualitySuite("schema-only", [ColumnExists("id"), HasType("id", LongType())]).validate(
+        dataframe
+    )
+
+    assert report.metadata.aggregate_actions == 0
+    assert report.metadata.spark_execution_duration_ms == 0.0
+    assert report.metadata.planning_duration_ms >= 0.0
+    assert report.metadata.result_evaluation_duration_ms >= 0.0
+    assert "execution_duration_ms" not in report.results[0].model_dump()
+
+
+@pytest.mark.integration
+def test_validation_does_not_stop_or_replace_callers_session(spark: SparkSession) -> None:
+    dataframe = spark.createDataFrame([(1,)], "id long")
+    original_session = dataframe.sparkSession
+
+    QualitySuite("lifecycle", [NotNull("id")]).validate(dataframe)
+
+    assert dataframe.sparkSession is original_session
+    assert spark.range(1).count() == 1
