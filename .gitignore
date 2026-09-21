@@ -11,3 +11,5 @@ dist/
 .idea/
 derby.log
 metastore_db/
+spark-warehouse/
+.ipynb_checkpoints/

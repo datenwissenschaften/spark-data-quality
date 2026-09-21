@@ -8,6 +8,13 @@ session ends.
 The library is intended for batch pipelines, local Spark applications, and managed
 Spark runtimes such as Databricks. It has no Databricks-specific runtime dependency.
 
+See the end-to-end data-quality workflow →
+[`notebooks/data_quality_workflow.ipynb`](notebooks/data_quality_workflow.ipynb), a
+game-analytics case study that profiles, validates, and visualizes a synthetic
+player/session dataset with this library.
+
+![Quality check outcomes for the notebook's synthetic game_sessions_ingest suite](docs/assets/data-quality-workflow/quality-results.png)
+
 ## Example
 
 ```python
@@ -160,6 +167,74 @@ distinct counts, minimum and
 maximum lengths, and bounded frequent values. Unsupported selected types are rejected
 before execution instead of receiving ambiguous statistics.
 
+## Fugue integration (optional)
+
+**Native PySpark is the optimized, primary backend for everything above.** The
+optional `fugue` extra adds exactly one thing: the ability to hand `QualitySuite`
+or `profile` a non-PySpark, Fugue-compatible dataframe (pandas, Arrow, Polars,
+DuckDB, a list of dictionaries, ...) instead of hand-writing the Spark
+conversion yourself.
+
+```bash
+pip install spark-data-quality[fugue]
+```
+
+```python
+import pandas as pd
+
+from spark_data_quality import InRange, NotNull, QualitySuite
+from spark_data_quality.fugue import validate
+
+suite = QualitySuite("players", [NotNull("player_id"), InRange("age", min_value=13, max_value=120)])
+pandas_players = pd.DataFrame({"player_id": [1, 2, 3], "age": [24, 31, 19]})
+
+report = validate(suite, pandas_players)  # binds to SparkSession.builder.getOrCreate() by default
+```
+
+`spark_data_quality.fugue` converts the input into a native PySpark `DataFrame`
+bound to a caller-controlled `SparkSession` (pass `spark=...` to bind explicitly;
+it never creates or stops a session beyond PySpark's own ambient-session
+convention), then calls the exact same `QualitySuite.validate` used for native
+input. There is no separate Fugue execution engine for checks themselves:
+
+- **Fugue provides input portability**, not alternate execution semantics. Every
+  built-in check runs through the identical Spark-native aggregation planning
+  described above, whether the input arrived as a PySpark `DataFrame` directly or
+  through this conversion. An already-native PySpark `DataFrame` passes through
+  unchanged (no conversion cost on the optimized path).
+- Because there is only one execution path (Spark) behind this boundary, check
+  semantics are identical for every built-in check regardless of the input
+  source — see the table below.
+- Converting *from* pandas has real, verified caveats independent of this
+  library: a pandas float `NaN` becomes Spark `NaN` (not SQL `NULL`), a pandas
+  integer column with a missing value is upcast to `float64` before Fugue ever
+  sees it, and a null inside a schema-declared integral column currently fails
+  the conversion outright with `PySparkTypeError` rather than silently
+  succeeding. These are documented in `spark_data_quality/fugue.py` and
+  exercised by `tests/integration/test_fugue.py`; pass an explicit Fugue
+  `schema` string, or use a native PySpark `DataFrame`, when a column's exact
+  type or null semantics must be preserved.
+
+| Check | Native PySpark | Via `spark_data_quality.fugue` | Notes |
+| --- | --- | --- | --- |
+| `ColumnExists` | yes | yes (identical) | Executes as native Spark after conversion. |
+| `HasType` | yes | yes (identical) | Sensitive to the pandas type-inference caveats above. |
+| `NotNull` | yes | yes (identical) | Pandas `NaN` is not SQL `NULL`; see caveats above. |
+| `Unique` | yes | yes (identical) | No behavior change; input source is irrelevant post-conversion. |
+| `InRange` | yes | yes (identical) | Explicitly rejects NaN regardless of input source. |
+| `AllowedValues` | yes | yes (identical) | No behavior change. |
+| `MatchesRegex` | yes | yes (identical) | No behavior change. |
+| `RowCount` | yes | yes (identical) | No behavior change. |
+
+The `notebook` extra's dependencies (Jupyter, Plotly, Kaleido, pandas) are
+required only to reproduce `notebooks/data_quality_workflow.ipynb`; neither
+`fugue` nor `notebook` is required to use the core library. Installing `fugue`
+pulls in `fugue[spark]`, and transitively pandas, pyarrow, and a few smaller
+packages; `packaging` is pinned explicitly in this extra as a safeguard for a
+verified gap in `fugue`'s own dependency (`triad` imports `packaging` without
+declaring it), which otherwise surfaces as `ModuleNotFoundError` in a bare
+environment that installs only this extra's declared requirements.
+
 ## Installation
 
 Python 3.12, PySpark 4.0 through 4.1, and a compatible JVM are required. CI uses Java 17.
@@ -172,6 +247,7 @@ For source development with Poetry:
 
 ```bash
 poetry install --with dev
+poetry install --with dev --extras "fugue notebook"   # optional integrations
 ```
 
 ## Development and testing
@@ -184,6 +260,13 @@ ruff check .
 ruff format --check .
 mypy
 pytest
+```
+
+Regenerate the end-to-end notebook and its committed PNG assets (requires the
+`fugue` and `notebook` extras):
+
+```bash
+make notebooks
 ```
 
 ## Limitations
@@ -203,6 +286,11 @@ pytest
   check or producing a fabricated result; this is deliberate (see
   [Architecture](docs/architecture.md)) but means user-defined checks are not currently
   a supported extension point.
+- `spark_data_quality.fugue` executes checks on Spark only. It does not run checks
+  natively on pandas, DuckDB, Polars, or any other Fugue-supported engine; it converts
+  the input into Spark first. A null inside a schema-declared integral column does not
+  currently survive Fugue's row-oriented (list-of-dictionaries) conversion path — it
+  fails with `PySparkTypeError` rather than being silently dropped or reinterpreted.
 
 ## Roadmap
 

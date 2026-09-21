@@ -159,3 +159,53 @@ type; `minimum`, `maximum`, and `mean` remain `Decimal` for that same column. Th
 typing inside one `NumericStatistics` instance is Spark's own aggregate-function
 typing, not something this library converts, and it is covered by
 `test_decimal_profile_retains_exact_decimal_values`.
+
+## Fugue integration boundary
+
+`spark_data_quality.fugue` (optional `fugue` extra) exists to let a caller pass a
+non-PySpark, Fugue-recognized dataframe to `QualitySuite`/`profile` without
+hand-writing the Spark conversion, not to run checks on multiple execution engines.
+
+The boundary was chosen after inspecting Fugue 0.9.7's actual public surface
+(`fugue.api`) rather than assumed from memory. Two functions make the whole
+integration possible and were confirmed by direct experimentation before writing
+any code:
+
+- `fugue.api.as_fugue_engine_df(engine, df, schema=None)` converts an
+  arbitrary Fugue-recognized dataframe into an engine-bound Fugue `DataFrame`.
+- `fugue.api.get_native_as_df(...)` unwraps that back to the engine's native
+  dataframe type.
+
+Constructing `fugue_spark.SparkExecutionEngine(spark_session=...)` with the
+existing check's `dataframe.sparkSession` (or a caller-supplied session) and
+running both calls was verified to:
+
+1. Return the exact same object, unchanged, when the input is already a native
+   PySpark `DataFrame` (`native2 is sdf` held in testing) — so the optimized
+   native path pays no conversion cost.
+2. Bind the resulting Spark `DataFrame` to the supplied `SparkSession`
+   (`native.sparkSession is spark` held in testing), never creating or
+   stopping a session of its own.
+
+Given that result, the smallest useful, technically honest integration is:
+**convert at the boundary, then reuse the unmodified native execution path.**
+The alternative considered and rejected — giving each check type its own
+Fugue-native implementation so it could run unmodified on pandas, DuckDB, or
+Polars — was rejected because every built-in check's semantics are
+deliberately Spark-specific (JVM `rlike` regex evaluation, Spark's exact
+`DataType` equality, `stddev_samp`'s fixed `DoubleType` return, Spark's NaN
+vs. NULL distinction). Reimplementing that per engine would either diverge
+silently between engines or become a large second maintenance surface for
+this project's scope. Because there is only one execution semantics behind
+the boundary (Spark's), the check-level portability matrix in
+[README.md](../README.md#fugue-integration-optional) is total by
+construction rather than aspirational — every built-in check behaves
+identically regardless of which side of the Fugue boundary the input
+arrived from.
+
+The concrete pandas-conversion caveats documented in
+`spark_data_quality/fugue.py` (float `NaN` vs. SQL `NULL`, integer-column
+upcasting, and the `PySparkTypeError` on a null inside a schema-declared
+integral column via row-oriented input) were each reproduced directly against
+the installed `fugue[spark]==0.9.7` package before being written down, and are
+each covered by a corresponding assertion in `tests/integration/test_fugue.py`.

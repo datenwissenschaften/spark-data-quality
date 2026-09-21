@@ -35,3 +35,28 @@ jobs:
       - name: Pytest
         run: |
           poetry run pytest
+
+  notebook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Poetry
+        run: python -m pip install poetry==2.3.1
+      - name: Install locked dependencies with fugue and notebook extras
+        run: poetry install --with dev --extras "fugue notebook" --no-interaction
+      - name: Register the notebook kernel
+        run: poetry run python -m ipykernel install --user --name python3 --display-name "Python 3"
+      - name: Execute the end-to-end notebook
+        run: poetry run jupyter nbconvert --to notebook --execute --inplace notebooks/data_quality_workflow.ipynb
+      - name: Verify Plotly PNG assets were regenerated
+        run: |
+          test -s docs/assets/data-quality-workflow/quality-results.png
+          test -s docs/assets/data-quality-workflow/profile-null-rates.png

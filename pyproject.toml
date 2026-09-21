@@ -14,6 +14,22 @@ dependencies = [
     "pyspark>=4.0,<4.2",
 ]
 
+[project.optional-dependencies]
+# `packaging` is pinned explicitly as a safeguard: fugue's own dependency
+# (`triad`) imports it without declaring it, so a bare environment that
+# installs only this extra's declared requirements can otherwise fail with
+# `ModuleNotFoundError: No module named 'packaging'` at import time.
+fugue = ["fugue[spark]>=0.9.7,<0.10", "packaging>=23"]
+notebook = [
+    "jupyter>=1.1,<2",
+    "nbclient>=0.10,<1",
+    "nbformat>=5.10,<6",
+    "ipykernel>=6.29,<7",
+    "plotly>=6.1,<7",
+    "kaleido>=1.0,<2",
+    "pandas>=2.2,<3",
+]
+
 [project.urls]
 Repository = "https://github.com/datenwissenschaften/spark-data-quality"
 
@@ -26,11 +42,13 @@ pytest = ">=8.3,<10"
 pytest-cov = ">=6,<8"
 ruff = ">=0.9,<0.15"
 mypy = ">=1.14,<2"
+pandas-stubs = ">=2.2,<3"
 
 [tool.ruff]
 target-version = "py312"
 line-length = 100
 src = ["src", "tests"]
+extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
@@ -40,6 +58,10 @@ python_version = "3.12"
 strict = true
 files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["fugue.*", "fugue_spark.*", "triad.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "-ra"
