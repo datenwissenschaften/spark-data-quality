@@ -63,6 +63,15 @@ plugins = ["pydantic.mypy"]
 module = ["fugue.*", "fugue_spark.*", "triad.*"]
 ignore_missing_imports = true
 
+# The `fugue` extra is optional, so CI type-checks this module both with it
+# installed (locally, and in the `notebook` job) and without it (the
+# `quality` job). Only the former surfaces the `attr-defined` errors that the
+# ignores below suppress, so `warn_unused_ignores` would otherwise flag them
+# as unused whenever `fugue` is absent.
+[[tool.mypy.overrides]]
+module = ["spark_data_quality.fugue"]
+warn_unused_ignores = false
+
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
