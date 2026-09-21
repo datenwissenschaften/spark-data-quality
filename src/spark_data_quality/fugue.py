@@ -119,7 +119,9 @@ def to_spark_dataframe(
     engine_dataframe = _fugue_api.as_fugue_engine_df(  # type: ignore[attr-defined]
         engine, dataframe, schema=schema
     )
-    native = _fugue_api.get_native_as_df(engine_dataframe)  # type: ignore[attr-defined]
+    native = _fugue_api.get_native_as_df(  # type: ignore[attr-defined]
+        engine_dataframe
+    )
     if not isinstance(native, SparkDataFrame):
         raise TypeError(
             "Fugue's Spark execution engine returned a "
