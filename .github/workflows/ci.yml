@@ -32,9 +32,10 @@ jobs:
         run: poetry run ruff format --check .
       - name: Mypy
         run: poetry run mypy
-      - name: Pytest
+      - name: Pytest with coverage
         run: |
-          poetry run pytest
+          poetry run pip install pytest-cov
+          poetry run pytest --cov=src --cov-report=term-missing --cov-report=xml
 
   notebook:
     runs-on: ubuntu-latest
