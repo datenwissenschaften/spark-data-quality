@@ -1,5 +1,7 @@
 # spark-data-quality
 
+[![CI](https://github.com/datenwissenschaften/spark-data-quality/actions/workflows/ci.yml/badge.svg)](https://github.com/datenwissenschaften/spark-data-quality/actions/workflows/ci.yml) ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg) ![PySpark 4](https://img.shields.io/badge/PySpark-4.x-E25A1C.svg) [![Last commit](https://img.shields.io/github/last-commit/datenwissenschaften/spark-data-quality)](https://github.com/datenwissenschaften/spark-data-quality/commits/main) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 `spark-data-quality` is a small, typed validation library for PySpark DataFrames. It
 turns reusable expectations into Spark expressions, combines compatible metrics into
 one aggregation, and returns Pydantic reports that remain usable after the Spark
