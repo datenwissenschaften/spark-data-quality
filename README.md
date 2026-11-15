@@ -109,6 +109,7 @@ count descending and value ascending, then limited to `top_k` (maximum 100).
 | `HasType` | Exact Spark `DataType` equality | Type is schema-level | Type is schema-level | Uses schema |
 | `NotNull` | SQL null count is zero | Fails | Not a null; passes | Passes vacuously |
 | `Unique` | Exact distinct count equals non-null count | Ignored, including repeated nulls | Participates as a value; repeated NaNs are duplicates | Passes vacuously |
+| `UniqueKey` | Exact distinct count of the column combination equals the count of rows with every key column non-null | Rows with a null in any key column are ignored | Participates as a value; repeated NaNs are duplicates | Passes vacuously |
 | `InRange` | Values satisfy configured inclusive or exclusive bounds | Ignored | Always fails | Passes vacuously |
 | `AllowedValues` | Values belong to a non-empty, homogeneous scalar set | Ignored | Fails because configured values must be finite | Passes vacuously |
 | `MatchesRegex` | Spark/JVM `rlike` matches the pattern | Ignored | Non-string columns are `ERROR` | Passes vacuously |

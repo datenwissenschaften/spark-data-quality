@@ -87,6 +87,32 @@ class Unique(ColumnCheck):
 
 
 @dataclass(frozen=True, slots=True)
+class UniqueKey(Check):
+    columns: tuple[str, ...]
+    check_type: ClassVar[str] = "unique_key"
+
+    def __post_init__(self) -> None:
+        Check.__post_init__(self)
+        if not isinstance(self.columns, tuple) or len(self.columns) < 2:
+            raise ValueError("columns must be a tuple of at least two column names")
+        for column in self.columns:
+            require_column_name(column)
+        if len(set(self.columns)) != len(self.columns):
+            raise ValueError("columns must not repeat")
+
+    @property
+    def description(self) -> str:
+        return f"Rows with non-null {', '.join(map(repr, self.columns))} are unique together"
+
+    @property
+    def required_columns(self) -> tuple[str, ...]:
+        return self.columns
+
+    def expected(self) -> dict[str, JsonValue]:
+        return {"columns": list(self.columns), "duplicate_excess_count": 0, "nulls": "ignored"}
+
+
+@dataclass(frozen=True, slots=True)
 class InRange(ColumnCheck):
     min_value: RangeBound | None = None
     max_value: RangeBound | None = None

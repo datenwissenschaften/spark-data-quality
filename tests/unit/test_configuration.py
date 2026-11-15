@@ -15,6 +15,7 @@ from spark_data_quality import (
     MatchesRegex,
     QualitySuite,
     RowCount,
+    UniqueKey,
 )
 
 
@@ -25,6 +26,10 @@ from spark_data_quality import (
         (lambda: ColumnExists("id", check_id=" "), "check_id"),
         (lambda: HasType("id", DataType()), "concrete"),
         (lambda: HasType("id", object()), "concrete"),  # type: ignore[arg-type]
+        (lambda: UniqueKey(("game",)), "at least two"),
+        (lambda: UniqueKey(["game", "level"]), "at least two"),  # type: ignore[arg-type]
+        (lambda: UniqueKey(("game", "")), "column"),
+        (lambda: UniqueKey(("game", "game")), "repeat"),
         (lambda: InRange("age"), "at least one"),
         (lambda: InRange("age", min_value=2, max_value=1), "must not exceed"),
         (lambda: InRange("age", min_value=math.nan), "finite"),

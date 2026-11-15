@@ -37,6 +37,7 @@ from spark_data_quality import (
     QualitySuite,
     RowCount,
     Unique,
+    UniqueKey,
 )
 from spark_data_quality.models.values import JsonValue
 
@@ -487,6 +488,60 @@ def test_unique_reports_excess_duplicates_not_all_duplicate_group_rows(
     assert result.affected_rows == 2
     assert result.evaluated_rows == 3
     assert result.failure_fraction == pytest.approx(2 / 3)
+
+
+@pytest.mark.integration
+def test_unique_key_counts_duplicate_combinations_and_ignores_incomplete_keys(
+    spark: SparkSession,
+) -> None:
+    dataframe = spark.createDataFrame(
+        [("a", 1), ("a", 1), ("a", 2), ("b", 1), ("b", None), ("b", None)],
+        "game string, level long",
+    )
+
+    result = (
+        QualitySuite("unique key", [UniqueKey(("game", "level"))]).validate(dataframe).results[0]
+    )
+
+    assert result.status is CheckStatus.FAIL
+    assert result.observed_value == {
+        "non_null_count": 4,
+        "distinct_count": 3,
+        "duplicate_excess_count": 1,
+    }
+    assert result.affected_rows == 1
+    assert result.evaluated_rows == 4
+    assert result.expected == {
+        "columns": ["game", "level"],
+        "duplicate_excess_count": 0,
+        "nulls": "ignored",
+    }
+
+
+@pytest.mark.integration
+def test_unique_key_passes_unique_combinations_and_rejects_map_columns(
+    spark: SparkSession,
+) -> None:
+    dataframe = spark.createDataFrame(
+        [("a", 1, {"x": 1}), ("a", 2, {"x": 1}), ("b", 1, {"x": 1})],
+        "game string, level long, tags map<string,long>",
+    )
+
+    passed, rejected = (
+        QualitySuite(
+            "unique key",
+            [UniqueKey(("game", "level")), UniqueKey(("game", "tags"))],
+        )
+        .validate(dataframe)
+        .results
+    )
+
+    assert passed.status is CheckStatus.PASS
+    assert passed.affected_rows == 0
+    assert rejected.status is CheckStatus.ERROR
+    assert rejected.diagnostic is not None
+    assert rejected.diagnostic.code == "UNEXPECTED_SPARK_TYPE"
+    assert rejected.diagnostic.column == "tags"
 
 
 @pytest.mark.integration

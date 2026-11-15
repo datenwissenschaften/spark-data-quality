@@ -10,6 +10,7 @@ from spark_data_quality.checks import (
     NotNull,
     RowCount,
     Unique,
+    UniqueKey,
 )
 from spark_data_quality.models import CheckResult, CheckStatus, SuiteReport
 from spark_data_quality.profiling import ColumnProfile, ProfileReport, profile
@@ -31,5 +32,6 @@ __all__ = [
     "RowCount",
     "SuiteReport",
     "Unique",
+    "UniqueKey",
     "profile",
 ]

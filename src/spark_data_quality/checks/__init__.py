@@ -10,6 +10,7 @@ from spark_data_quality.checks.builtin import (
     NotNull,
     RowCount,
     Unique,
+    UniqueKey,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "NotNull",
     "RowCount",
     "Unique",
+    "UniqueKey",
 ]

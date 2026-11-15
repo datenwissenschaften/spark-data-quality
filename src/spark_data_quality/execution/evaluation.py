@@ -16,6 +16,7 @@ from spark_data_quality.checks import (
     NotNull,
     RowCount,
     Unique,
+    UniqueKey,
 )
 from spark_data_quality.execution.planning import PreparedCheck
 from spark_data_quality.models import CheckResult, CheckStatus
@@ -71,8 +72,8 @@ def evaluate_check(
             total_rows=total,
         )
 
-    if isinstance(check, Unique):
-        evaluated = int(metrics[prepared.metric_aliases["evaluated"]])
+    if isinstance(check, (Unique, UniqueKey)):
+        evaluated = int(metrics[prepared.metric_aliases["evaluated"]] or 0)
         distinct = int(metrics[prepared.metric_aliases["distinct"]])
         affected = evaluated - distinct
         data_observed: JsonValue = {

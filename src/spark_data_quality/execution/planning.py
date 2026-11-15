@@ -31,6 +31,7 @@ from spark_data_quality.checks import (
     NotNull,
     RowCount,
     Unique,
+    UniqueKey,
 )
 from spark_data_quality.models import Diagnostic
 
@@ -141,6 +142,18 @@ class AggregationPlanner:
             aliases["distinct"] = self._metric(
                 ("distinct_count", check.column, ()), F.countDistinct(_column(check.column))
             )
+        elif isinstance(check, UniqueKey):
+            columns = tuple(_column(name) for name in check.columns)
+            complete = F.lit(True)
+            for column in columns:
+                complete = complete & column.isNotNull()
+            aliases["evaluated"] = self._metric(
+                ("complete_count", None, check.columns),
+                F.sum(F.when(complete, 1).otherwise(0)),
+            )
+            aliases["distinct"] = self._metric(
+                ("distinct_count", None, check.columns), F.countDistinct(*columns)
+            )
         elif isinstance(check, InRange):
             aliases["evaluated"] = self._metric(
                 ("non_null_count", check.column, ()), F.count(_column(check.column))
@@ -243,6 +256,12 @@ class AggregationPlanner:
                 expected = f"compatible with {type(value).__name__} allowed values"
         elif isinstance(check, Unique) and isinstance(actual, MapType):
             expected = "a Spark type that supports exact distinct aggregation"
+        elif isinstance(check, UniqueKey):
+            for name in check.columns:
+                if isinstance(self._field(name).dataType, MapType):
+                    column, actual = name, self._field(name).dataType
+                    expected = "a Spark type that supports exact distinct aggregation"
+                    break
 
         if expected is None:
             return None
