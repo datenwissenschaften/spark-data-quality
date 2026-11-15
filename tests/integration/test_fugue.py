@@ -218,7 +218,7 @@ def test_fugue_module_raises_clear_import_error_without_fugue_installed() -> Non
         try:
             import spark_data_quality.fugue  # noqa: F401
         except ImportError as error:
-            assert "pip install spark-data-quality[fugue]" in str(error)
+            assert "pip install pyspark-data-quality[fugue]" in str(error)
             print("CLEAR_IMPORT_ERROR_OK")
         else:
             raise AssertionError("expected ImportError when fugue is unavailable")

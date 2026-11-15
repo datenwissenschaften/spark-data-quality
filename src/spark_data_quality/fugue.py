@@ -1,6 +1,6 @@
 """Optional Fugue integration: portable dataframe input into the native Spark backend.
 
-This module requires the ``fugue`` extra (``pip install spark-data-quality[fugue]``).
+This module requires the ``fugue`` extra (``pip install pyspark-data-quality[fugue]``).
 Importing :mod:`spark_data_quality` itself never imports Fugue; only importing this
 module does.
 
@@ -70,7 +70,7 @@ try:
 except ModuleNotFoundError as error:  # pragma: no cover - exercised via subprocess test
     raise ImportError(
         "spark_data_quality.fugue requires the optional 'fugue' extra. "
-        "Install it with: pip install spark-data-quality[fugue]"
+        "Install it with: pip install pyspark-data-quality[fugue]"
     ) from error
 
 try:
@@ -78,7 +78,7 @@ try:
 except ModuleNotFoundError as error:  # pragma: no cover - exercised via subprocess test
     raise ImportError(
         "spark_data_quality.fugue requires Fugue's Spark execution backend. "
-        "Install it with: pip install spark-data-quality[fugue]"
+        "Install it with: pip install pyspark-data-quality[fugue]"
     ) from error
 
 from spark_data_quality.models import SuiteReport

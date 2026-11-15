@@ -1,6 +1,6 @@
 # spark-data-quality
 
-[![CI](https://github.com/datenwissenschaften/spark-data-quality/actions/workflows/ci.yml/badge.svg)](https://github.com/datenwissenschaften/spark-data-quality/actions/workflows/ci.yml) ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg) ![PySpark 4](https://img.shields.io/badge/PySpark-4.x-E25A1C.svg) [![Last commit](https://img.shields.io/github/last-commit/datenwissenschaften/spark-data-quality)](https://github.com/datenwissenschaften/spark-data-quality/commits/main) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Ruff](https://img.shields.io/badge/lint-Ruff-D7FF64.svg) ![mypy](https://img.shields.io/badge/types-mypy-2A6DB2.svg) [![codecov](https://codecov.io/gh/datenwissenschaften/spark-data-quality/graph/badge.svg)](https://codecov.io/gh/datenwissenschaften/spark-data-quality)
+[![CI](https://github.com/datenwissenschaften/spark-data-quality/actions/workflows/ci.yml/badge.svg)](https://github.com/datenwissenschaften/spark-data-quality/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/pyspark-data-quality.svg)](https://pypi.org/project/pyspark-data-quality/) ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg) ![PySpark 4](https://img.shields.io/badge/PySpark-4.x-E25A1C.svg) [![Last commit](https://img.shields.io/github/last-commit/datenwissenschaften/spark-data-quality)](https://github.com/datenwissenschaften/spark-data-quality/commits/main) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Ruff](https://img.shields.io/badge/lint-Ruff-D7FF64.svg) ![mypy](https://img.shields.io/badge/types-mypy-2A6DB2.svg) [![codecov](https://codecov.io/gh/datenwissenschaften/spark-data-quality/graph/badge.svg)](https://codecov.io/gh/datenwissenschaften/spark-data-quality)
 
 `spark-data-quality` is a small, typed validation library for PySpark DataFrames. It
 turns reusable expectations into Spark expressions, combines compatible metrics into
@@ -179,7 +179,7 @@ DuckDB, a list of dictionaries, ...) instead of hand-writing the Spark
 conversion yourself.
 
 ```bash
-pip install spark-data-quality[fugue]
+pip install "pyspark-data-quality[fugue]"
 ```
 
 ```python
@@ -242,8 +242,11 @@ environment that installs only this extra's declared requirements.
 
 Python 3.12, PySpark 4.0 through 4.1, and a compatible JVM are required. CI uses Java 17.
 
+The distribution is published on PyPI as `pyspark-data-quality`; the import package is
+`spark_data_quality`.
+
 ```bash
-pip install spark-data-quality
+pip install pyspark-data-quality
 ```
 
 For source development with Poetry:
